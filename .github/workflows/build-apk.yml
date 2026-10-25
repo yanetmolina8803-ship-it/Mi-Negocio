@@ -1,4 +1,5 @@
 
+
 name: Crear APK Mi Negocio
 
 on:
@@ -15,26 +16,60 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Descargar codigo
+      - name: Descargar archivos de GitHub
         uses: actions/checkout@v4
+
+      - name: Mostrar archivos del repositorio
+        run: |
+          pwd
+          ls -la
+          find . -maxdepth 4 -type f \( -name "settings.gradle" -o -name "settings.gradle.kts" \)
+
+      - name: Extraer ZIP del proyecto
+        run: |
+          ZIP="Mi_Negocio_APK_Proyecto_v2.zip"
+          if [ ! -f "$ZIP" ]; then
+            echo "ERROR: No se encuentra $ZIP en la raiz del repositorio"
+            exit 1
+          fi
+          mkdir -p proyecto
+          unzip -o "$ZIP" -d proyecto
 
       - name: Preparar Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '21'
+          java-version: '17'
 
       - name: Preparar Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
 
-      - name: Crear APK
-        run: gradle assembleDebug
+      - name: Encontrar y compilar el proyecto
+        run: |
+          echo "Buscando settings.gradle..."
+          find proyecto -type f \( -name "settings.gradle" -o -name "settings.gradle.kts" \)
+          SETTINGS=$(find proyecto -type f \( -name "settings.gradle" -o -name "settings.gradle.kts" \) | head -n 1)
+          if [ -z "$SETTINGS" ]; then
+            echo "ERROR: El ZIP no contiene settings.gradle"
+            echo "Archivos encontrados:"
+            find proyecto -maxdepth 5 -type f | head -n 100
+            exit 1
+          fi
+          DIR=$(dirname "$SETTINGS")
+          echo "Carpeta del proyecto: $DIR"
+          cd "$DIR"
+          if [ ! -d app ]; then
+            echo "ERROR: No existe la carpeta app junto a settings.gradle"
+            ls -la
+            exit 1
+          fi
+          gradle assembleDebug
 
       - name: Guardar APK
         uses: actions/upload-artifact@v4
         with:
           name: Mi-Negocio-APK
-          path: app/build/outputs/apk/debug/*.apk
+          path: proyecto/**/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
