@@ -19,23 +19,17 @@ jobs:
       - name: Descargar archivos de GitHub
         uses: actions/checkout@v4
 
-      - name: Mostrar archivos del repositorio
-        run: |
-          pwd
-          ls -la
-          find . -maxdepth 4 -type f \( -name "settings.gradle" -o -name "settings.gradle.kts" \)
-
       - name: Extraer ZIP del proyecto
         run: |
           ZIP="Mi_Negocio_APK_Proyecto_v2.zip"
           if [ ! -f "$ZIP" ]; then
-            echo "ERROR: No se encuentra $ZIP en la raiz del repositorio"
+            echo "ERROR: No se encuentra $ZIP"
             exit 1
           fi
           mkdir -p proyecto
           unzip -o "$ZIP" -d proyecto
 
-      - name: Preparar Java
+      - name: Preparar Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -46,25 +40,46 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Encontrar y compilar el proyecto
+      - name: Corregir compatibilidad Java y Kotlin
         run: |
-          echo "Buscando settings.gradle..."
-          find proyecto -type f \( -name "settings.gradle" -o -name "settings.gradle.kts" \)
           SETTINGS=$(find proyecto -type f \( -name "settings.gradle" -o -name "settings.gradle.kts" \) | head -n 1)
           if [ -z "$SETTINGS" ]; then
-            echo "ERROR: El ZIP no contiene settings.gradle"
-            echo "Archivos encontrados:"
-            find proyecto -maxdepth 5 -type f | head -n 100
+            echo "ERROR: No se encontró settings.gradle"
             exit 1
           fi
           DIR=$(dirname "$SETTINGS")
-          echo "Carpeta del proyecto: $DIR"
           cd "$DIR"
-          if [ ! -d app ]; then
-            echo "ERROR: No existe la carpeta app junto a settings.gradle"
-            ls -la
-            exit 1
-          fi
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path("app/build.gradle")
+          if not p.exists():
+              raise SystemExit("ERROR: No se encontró app/build.gradle")
+
+          s = p.read_text()
+          if "android {" not in s:
+              raise SystemExit("ERROR: No se encontró el bloque android en app/build.gradle")
+
+          fix = """
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+              kotlinOptions {
+                  jvmTarget = '17'
+              }
+          """
+
+          s = s.replace("android {", "android {\n" + fix, 1)
+          p.write_text(s)
+          print("Configuración Java/Kotlin añadida.")
+          PY
+
+      - name: Compilar APK
+        run: |
+          SETTINGS=$(find proyecto -type f \( -name "settings.gradle" -o -name "settings.gradle.kts" \) | head -n 1)
+          DIR=$(dirname "$SETTINGS")
+          cd "$DIR"
           gradle assembleDebug
 
       - name: Guardar APK
