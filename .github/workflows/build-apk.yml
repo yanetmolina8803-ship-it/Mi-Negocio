@@ -1,5 +1,4 @@
 
-
 name: Crear APK Mi Negocio
 
 on:
@@ -21,9 +20,9 @@ jobs:
 
       - name: Extraer ZIP del proyecto
         run: |
-          ZIP="Mi_Negocio_APK_Proyecto_v2.zip"
+          ZIP="Mi_Negocio_APK_Proyecto_v3.zip"
           if [ ! -f "$ZIP" ]; then
-            echo "ERROR: No se encuentra $ZIP"
+            echo "ERROR: No se encuentra $ZIP en la raiz del repositorio"
             exit 1
           fi
           mkdir -p proyecto
@@ -40,26 +39,30 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Corregir compatibilidad Java y Kotlin
+      - name: Encontrar proyecto Android
         run: |
           SETTINGS=$(find proyecto -type f \( -name "settings.gradle" -o -name "settings.gradle.kts" \) | head -n 1)
           if [ -z "$SETTINGS" ]; then
-            echo "ERROR: No se encontró settings.gradle"
+            echo "ERROR: No se encontró settings.gradle dentro del ZIP"
+            find proyecto -maxdepth 5 -type f | head -n 100
             exit 1
           fi
           DIR=$(dirname "$SETTINGS")
-          cd "$DIR"
+          echo "Proyecto encontrado en: $DIR"
+          test -d "$DIR/app" || { echo "ERROR: Falta la carpeta app"; exit 1; }
+          echo "PROJECT_DIR=$DIR" >> "$GITHUB_ENV"
+
+      - name: Corregir compatibilidad Java y Kotlin
+        run: |
+          cd "$PROJECT_DIR"
           python3 - <<'PY'
           from pathlib import Path
-
           p = Path("app/build.gradle")
           if not p.exists():
               raise SystemExit("ERROR: No se encontró app/build.gradle")
-
           s = p.read_text()
           if "android {" not in s:
-              raise SystemExit("ERROR: No se encontró el bloque android en app/build.gradle")
-
+              raise SystemExit("ERROR: No se encontró el bloque android")
           fix = """
               compileOptions {
                   sourceCompatibility JavaVersion.VERSION_17
@@ -69,17 +72,14 @@ jobs:
                   jvmTarget = '17'
               }
           """
-
           s = s.replace("android {", "android {\n" + fix, 1)
           p.write_text(s)
-          print("Configuración Java/Kotlin añadida.")
+          print("Compatibilidad Java/Kotlin configurada.")
           PY
 
       - name: Compilar APK
         run: |
-          SETTINGS=$(find proyecto -type f \( -name "settings.gradle" -o -name "settings.gradle.kts" \) | head -n 1)
-          DIR=$(dirname "$SETTINGS")
-          cd "$DIR"
+          cd "$PROJECT_DIR"
           gradle assembleDebug
 
       - name: Guardar APK
