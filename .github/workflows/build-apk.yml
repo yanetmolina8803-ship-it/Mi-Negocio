@@ -9,11 +9,12 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Descargar el repositorio
         uses: actions/checkout@v4
 
-      - name: Preparar Java 17
+      - name: Preparar Java 21
         uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -29,34 +30,47 @@ jobs:
         shell: bash
         run: |
           set -e
-          echo "Buscando settings.gradle en el repositorio..."
-          SETTINGS=$(find . -type f -name settings.gradle -not -path '*/.gradle/*' -not -path '*/build/*' | head -n 1 || true)
+          echo "Buscando settings.gradle..."
+          SETTINGS=$(find . -type f -name settings.gradle \
+            -not -path '*/.gradle/*' \
+            -not -path '*/build/*' | head -n 1 || true)
 
           if [ -z "$SETTINGS" ]; then
             mkdir -p proyecto_extraido
+
             while IFS= read -r ARCHIVO_ZIP; do
               [ -z "$ARCHIVO_ZIP" ] && continue
               DESTINO="proyecto_extraido/$(basename "$ARCHIVO_ZIP" .zip)"
               mkdir -p "$DESTINO"
-              echo "Probando archivo: $ARCHIVO_ZIP"
+
+              echo "Probando: $ARCHIVO_ZIP"
               unzip -oq "$ARCHIVO_ZIP" -d "$DESTINO" || true
-              SETTINGS=$(find "$DESTINO" -type f -name settings.gradle -not -path '*/.gradle/*' -not -path '*/build/*' | head -n 1 || true)
-              if [ -n "$SETTINGS" ]; then break; fi
-            done < <(find . -maxdepth 4 -type f -iname '*.zip' -not -path './.git/*' -not -path './proyecto_extraido/*' | sort)
+
+              SETTINGS=$(find "$DESTINO" -type f -name settings.gradle \
+                -not -path '*/.gradle/*' \
+                -not -path '*/build/*' | head -n 1 || true)
+
+              if [ -n "$SETTINGS" ]; then
+                break
+              fi
+            done < <(find . -maxdepth 4 -type f -iname '*.zip' \
+              -not -path './.git/*' \
+              -not -path './proyecto_extraido/*' | sort)
           fi
 
           if [ -z "$SETTINGS" ]; then
-            echo "ERROR: No se encontró settings.gradle ni dentro de un ZIP del repositorio."
-            echo "Contenido del repositorio:"
+            echo "ERROR: No se encontró settings.gradle."
             find . -maxdepth 4 -type f | sort | head -n 200
             exit 1
           fi
 
           CARPETA=$(dirname "$SETTINGS")
+
           if [ ! -f "$CARPETA/app/build.gradle" ]; then
-            echo "ERROR: Se encontró settings.gradle en $CARPETA, pero falta app/build.gradle."
+            echo "ERROR: Falta app/build.gradle en $CARPETA."
             exit 1
           fi
+
           echo "Proyecto encontrado en: $CARPETA"
           echo "dir=$CARPETA" >> "$GITHUB_OUTPUT"
 
