@@ -31,31 +31,19 @@ jobs:
         run: |
           set -e
           echo "Buscando settings.gradle..."
-          SETTINGS=$(find . -type f -name settings.gradle \
-            -not -path '*/.gradle/*' \
-            -not -path '*/build/*' | head -n 1 || true)
+          SETTINGS=$(find . -type f -name settings.gradle -not -path '*/.gradle/*' -not -path '*/build/*' | head -n 1 || true)
 
           if [ -z "$SETTINGS" ]; then
             mkdir -p proyecto_extraido
-
             while IFS= read -r ARCHIVO_ZIP; do
               [ -z "$ARCHIVO_ZIP" ] && continue
               DESTINO="proyecto_extraido/$(basename "$ARCHIVO_ZIP" .zip)"
               mkdir -p "$DESTINO"
-
               echo "Probando: $ARCHIVO_ZIP"
               unzip -oq "$ARCHIVO_ZIP" -d "$DESTINO" || true
-
-              SETTINGS=$(find "$DESTINO" -type f -name settings.gradle \
-                -not -path '*/.gradle/*' \
-                -not -path '*/build/*' | head -n 1 || true)
-
-              if [ -n "$SETTINGS" ]; then
-                break
-              fi
-            done < <(find . -maxdepth 4 -type f -iname '*.zip' \
-              -not -path './.git/*' \
-              -not -path './proyecto_extraido/*' | sort)
+              SETTINGS=$(find "$DESTINO" -type f -name settings.gradle -not -path '*/.gradle/*' -not -path '*/build/*' | head -n 1 || true)
+              if [ -n "$SETTINGS" ]; then break; fi
+            done < <(find . -maxdepth 4 -type f -iname '*.zip' -not -path './.git/*' -not -path './proyecto_extraido/*' | sort)
           fi
 
           if [ -z "$SETTINGS" ]; then
