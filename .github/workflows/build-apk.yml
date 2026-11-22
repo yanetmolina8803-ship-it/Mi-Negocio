@@ -4,16 +4,13 @@ name: Crear APK de Mi Negocio
 on:
   workflow_dispatch:
   push:
-    branches:
-      - main
-      - master
+    branches: [ main, master ]
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Descargar el proyecto
+      - name: Descargar el repositorio
         uses: actions/checkout@v4
 
       - name: Preparar Java 17
@@ -27,27 +24,49 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Verificar archivos del proyecto
+      - name: Encontrar o extraer el proyecto
+        id: proyecto
+        shell: bash
         run: |
-          echo "Buscando settings.gradle..."
-          find . -name settings.gradle -not -path "*/.gradle/*"
+          set -e
+          echo "Buscando settings.gradle en el repositorio..."
+          SETTINGS=$(find . -type f -name settings.gradle -not -path '*/.gradle/*' -not -path '*/build/*' | head -n 1 || true)
 
-          if [ ! -f settings.gradle ]; then
-            echo "ERROR: No se encontro settings.gradle en la raiz."
+          if [ -z "$SETTINGS" ]; then
+            mkdir -p proyecto_extraido
+            while IFS= read -r ARCHIVO_ZIP; do
+              [ -z "$ARCHIVO_ZIP" ] && continue
+              DESTINO="proyecto_extraido/$(basename "$ARCHIVO_ZIP" .zip)"
+              mkdir -p "$DESTINO"
+              echo "Probando archivo: $ARCHIVO_ZIP"
+              unzip -oq "$ARCHIVO_ZIP" -d "$DESTINO" || true
+              SETTINGS=$(find "$DESTINO" -type f -name settings.gradle -not -path '*/.gradle/*' -not -path '*/build/*' | head -n 1 || true)
+              if [ -n "$SETTINGS" ]; then break; fi
+            done < <(find . -maxdepth 4 -type f -iname '*.zip' -not -path './.git/*' -not -path './proyecto_extraido/*' | sort)
+          fi
+
+          if [ -z "$SETTINGS" ]; then
+            echo "ERROR: No se encontró settings.gradle ni dentro de un ZIP del repositorio."
+            echo "Contenido del repositorio:"
+            find . -maxdepth 4 -type f | sort | head -n 200
             exit 1
           fi
 
-          if [ ! -f app/build.gradle ]; then
-            echo "ERROR: No se encontro app/build.gradle."
+          CARPETA=$(dirname "$SETTINGS")
+          if [ ! -f "$CARPETA/app/build.gradle" ]; then
+            echo "ERROR: Se encontró settings.gradle en $CARPETA, pero falta app/build.gradle."
             exit 1
           fi
+          echo "Proyecto encontrado en: $CARPETA"
+          echo "dir=$CARPETA" >> "$GITHUB_OUTPUT"
 
       - name: Compilar APK
+        working-directory: ${{ steps.proyecto.outputs.dir }}
         run: gradle assembleDebug
 
-      - name: Guardar APK
+      - name: Guardar APK para descargar
         uses: actions/upload-artifact@v4
         with:
           name: Mi-Negocio-APK
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: ${{ steps.proyecto.outputs.dir }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
