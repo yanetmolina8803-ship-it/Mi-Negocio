@@ -4,9 +4,7 @@ name: Crear APK de Mi Negocio
 on:
   workflow_dispatch:
   push:
-    branches:
-      - main
-      - master
+    branches: [ main, master ]
 
 jobs:
   build:
@@ -27,52 +25,87 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Encontrar proyecto Android
+      - name: Encontrar o extraer proyecto Android
         id: proyecto
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
 
-          SETTINGS=$(find . -type f -name settings.gradle \
+          echo "Buscando settings.gradle..."
+          SETTINGS="$(find . -type f -name settings.gradle \
+            -not -path '*/.git/*' \
             -not -path '*/.gradle/*' \
-            -not -path '*/build/*' | head -n 1)
+            -not -path '*/build/*' \
+            -print -quit || true)"
 
           if [ -z "$SETTINGS" ]; then
-            echo "ERROR: No se encontró settings.gradle."
+            echo "No se encontró el proyecto. Buscando archivos ZIP..."
+            mkdir -p .proyecto_extraido
+
+            while IFS= read -r -d '' ZIP; do
+              DEST=".proyecto_extraido/$(basename "$ZIP" .zip)"
+              mkdir -p "$DEST"
+
+              echo "Extrayendo: $ZIP"
+              unzip -oq "$ZIP" -d "$DEST"
+
+              SETTINGS="$(find "$DEST" -type f -name settings.gradle \
+                -not -path '*/.gradle/*' \
+                -not -path '*/build/*' \
+                -print -quit || true)"
+
+              if [ -n "$SETTINGS" ]; then
+                break
+              fi
+            done < <(find . -type f -iname '*.zip' \
+              -not -path './.git/*' \
+              -not -path './.proyecto_extraido/*' \
+              -print0)
+          fi
+
+          if [ -z "$SETTINGS" ]; then
+            echo "ERROR: No aparece settings.gradle."
+            find . -maxdepth 5 -type f \
+              -not -path './.git/*' | sort | head -n 250
             exit 1
           fi
 
-          CARPETA=$(dirname "$SETTINGS")
+          ROOT="$(dirname "$SETTINGS")"
 
-          if [ ! -f "$CARPETA/app/build.gradle" ]; then
-            echo "ERROR: Falta app/build.gradle en $CARPETA"
+          if [ ! -f "$ROOT/app/build.gradle" ]; then
+            echo "ERROR: Falta app/build.gradle"
             exit 1
           fi
 
-          echo "Proyecto encontrado: $CARPETA"
-          echo "dir=$CARPETA" >> "$GITHUB_OUTPUT"
+          if [ ! -f "$ROOT/app/src/main/assets/index.html" ]; then
+            echo "ERROR: Falta index.html"
+            exit 1
+          fi
 
-      - name: Verificar unidades de Inversión
+          echo "Proyecto encontrado: $ROOT"
+          echo "dir=$ROOT" >> "$GITHUB_OUTPUT"
+
+      - name: Verificar selector de unidad en Inversión
         working-directory: ${{ steps.proyecto.outputs.dir }}
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
 
           HTML="app/src/main/assets/index.html"
 
-          if [ ! -f "$HTML" ]; then
-            echo "ERROR: No existe $HTML"
+          grep -q '<select id="unit' "$HTML" || {
+            echo "ERROR: No se encontró el selector de unidad de Inversión."
             exit 1
-          fi
+          }
 
-          for unidad in lb kg saco pomo caja pqte otros; do
-            if ! grep -qi "value=\"$unidad\"" "$HTML"; then
-              echo "ERROR: Falta la unidad $unidad en index.html"
+          for UNIT in lb kg saco pomo caja pqte otros; do
+            grep -q "value=\"$UNIT\"" "$HTML" || {
+              echo "ERROR: Falta la opción $UNIT."
               exit 1
-            fi
+            }
           done
 
-          echo "Las siete unidades están presentes."
+          echo "Selector y siete unidades encontrados."
 
       - name: Compilar APK
         working-directory: ${{ steps.proyecto.outputs.dir }}
