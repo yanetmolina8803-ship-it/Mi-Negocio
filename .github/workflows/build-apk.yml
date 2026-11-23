@@ -4,7 +4,9 @@ name: Crear APK de Mi Negocio
 on:
   workflow_dispatch:
   push:
-    branches: [ main, master ]
+    branches:
+      - main
+      - master
 
 jobs:
   build:
@@ -25,87 +27,99 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Encontrar o extraer proyecto Android
+      - name: Instalar herramientas
+        run: sudo apt-get update && sudo apt-get install -y unzip
+
+      - name: Encontrar proyecto Android
         id: proyecto
         shell: bash
         run: |
           set -euo pipefail
 
-          echo "Buscando settings.gradle..."
-          SETTINGS="$(find . -type f -name settings.gradle \
+          SETTINGS=$(find . -type f -name settings.gradle \
             -not -path '*/.git/*' \
             -not -path '*/.gradle/*' \
             -not -path '*/build/*' \
-            -print -quit || true)"
+            -print -quit || true)
 
           if [ -z "$SETTINGS" ]; then
-            echo "No se encontró el proyecto. Buscando archivos ZIP..."
-            mkdir -p .proyecto_extraido
+            echo "Buscando proyecto dentro de archivos ZIP..."
+            mkdir -p .extraido
 
             while IFS= read -r -d '' ZIP; do
-              DEST=".proyecto_extraido/$(basename "$ZIP" .zip)"
+              DEST=".extraido/$(basename "$ZIP" .zip)"
               mkdir -p "$DEST"
-
-              echo "Extrayendo: $ZIP"
               unzip -oq "$ZIP" -d "$DEST"
 
-              SETTINGS="$(find "$DEST" -type f -name settings.gradle \
+              SETTINGS=$(find "$DEST" -type f -name settings.gradle \
                 -not -path '*/.gradle/*' \
                 -not -path '*/build/*' \
-                -print -quit || true)"
+                -print -quit || true)
 
               if [ -n "$SETTINGS" ]; then
                 break
               fi
             done < <(find . -type f -iname '*.zip' \
               -not -path './.git/*' \
-              -not -path './.proyecto_extraido/*' \
-              -print0)
+              -not -path './.extraido/*' -print0)
           fi
 
           if [ -z "$SETTINGS" ]; then
-            echo "ERROR: No aparece settings.gradle."
-            find . -maxdepth 5 -type f \
-              -not -path './.git/*' | sort | head -n 250
+            echo "ERROR: No se encontró settings.gradle"
+            find . -maxdepth 5 -type f | head -n 200
             exit 1
           fi
 
-          ROOT="$(dirname "$SETTINGS")"
+          ROOT=$(dirname "$SETTINGS")
 
-          if [ ! -f "$ROOT/app/build.gradle" ]; then
+          test -f "$ROOT/app/build.gradle" || {
             echo "ERROR: Falta app/build.gradle"
             exit 1
-          fi
+          }
 
-          if [ ! -f "$ROOT/app/src/main/assets/index.html" ]; then
+          test -f "$ROOT/app/src/main/assets/index.html" || {
             echo "ERROR: Falta index.html"
             exit 1
-          fi
+          }
 
-          echo "Proyecto encontrado: $ROOT"
+          echo "Proyecto encontrado en: $ROOT"
           echo "dir=$ROOT" >> "$GITHUB_OUTPUT"
 
-      - name: Verificar selector de unidad en Inversión
+      - name: Verificar selector de Inversión
         working-directory: ${{ steps.proyecto.outputs.dir }}
         shell: bash
         run: |
           set -euo pipefail
 
-          HTML="app/src/main/assets/index.html"
+          python3 <<'PY'
+          from pathlib import Path
 
-          grep -q '<select id="unit' "$HTML" || {
-            echo "ERROR: No se encontró el selector de unidad de Inversión."
-            exit 1
-          }
+          archivo = Path("app/src/main/assets/index.html")
+          html = archivo.read_text(encoding="utf-8")
 
-          for UNIT in lb kg saco pomo caja pqte otros; do
-            grep -q "value=\"$UNIT\"" "$HTML" || {
-              echo "ERROR: Falta la opción $UNIT."
-              exit 1
-            }
-          done
+          selector = '<select id="unit${i}"'
+          unidades = [
+              'value="lb"',
+              'value="kg"',
+              'value="saco"',
+              'value="pomo"',
+              'value="caja"',
+              'value="pqte"',
+              'value="otros"',
+          ]
 
-          echo "Selector y siete unidades encontrados."
+          if selector not in html:
+              raise SystemExit(
+                  "ERROR: No aparece el selector desplegable de Inversión."
+              )
+
+          for unidad in unidades:
+              if unidad not in html:
+                  raise SystemExit(f"ERROR: Falta la opción {unidad}.")
+
+          print("Selector de Inversión encontrado.")
+          print("Las siete unidades están presentes.")
+          PY
 
       - name: Compilar APK
         working-directory: ${{ steps.proyecto.outputs.dir }}
